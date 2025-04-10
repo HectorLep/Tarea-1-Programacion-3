@@ -5,12 +5,15 @@ import json
 from pydantic import BaseModel
 
 from models import obtener_db, Personaje, Mision, crear_tablas
-from tda_cola import Cola
+from tda_cola import Cola  
 
 app = FastAPI(title="Sistema de Misiones RPG")
 
 # Creación de tablas
 crear_tablas()
+
+# Diccionario para almacenar colas temporales por personaje (en memoria)
+colas_personajes: Dict[int, Cola[Mision]] = {}
 
 # Modelos Pydantic para validación de datos
 class CrearPersonaje(BaseModel):
@@ -37,11 +40,15 @@ class RespuestaMision(BaseModel):
 # Endpoints
 @app.post("/personajes", response_model=RespuestaPersonaje)
 def crear_personaje(personaje: CrearPersonaje, db: Session = Depends(obtener_db)):
-    """Crea un nuevo personaje"""
+    """Crea un nuevo personaje y le asigna una cola vacía"""
     db_personaje = Personaje(nombre=personaje.nombre)
     db.add(db_personaje)
     db.commit()
     db.refresh(db_personaje)
+    
+    # Crear una cola vacía para este personaje en memoria
+    colas_personajes[db_personaje.id] = Cola()
+    
     return db_personaje.a_diccionario()
 
 @app.post("/misiones", response_model=RespuestaMision)
@@ -59,7 +66,7 @@ def crear_mision(mision: CrearMision, db: Session = Depends(obtener_db)):
 
 @app.post("/personajes/{personaje_id}/misiones/{mision_id}")
 def aceptar_mision(personaje_id: int, mision_id: int, db: Session = Depends(obtener_db)):
-    """Acepta una misión para un personaje (encola)"""
+    """Acepta una misión y la añade a la cola temporal del personaje"""
     personaje = db.query(Personaje).filter(Personaje.id == personaje_id).first()
     if not personaje:
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
@@ -68,16 +75,23 @@ def aceptar_mision(personaje_id: int, mision_id: int, db: Session = Depends(obte
     if not mision:
         raise HTTPException(status_code=404, detail="Misión no encontrada")
     
-    # Verificar si la misión ya está asignada
-    for mision_existente in personaje.misiones:
-        if mision_existente.id == mision_id:
-            raise HTTPException(status_code=400, detail="Misión ya asignada al personaje")
+    # Verificar si la misión ya está en la cola del personaje
+    if personaje_id in colas_personajes:
+        cola = colas_personajes[personaje_id]
+        for m in cola:  # Iteramos sobre la cola usando __iter__
+            if m.id == mision_id:
+                raise HTTPException(status_code=400, detail="Misión ya asignada al personaje")
+    else:
+        colas_personajes[personaje_id] = Cola()  # Si no existe, creamos la cola
     
-    # Encontrar el último orden para este personaje
-    siguiente_orden = 1
+    # Añadir la misión a la cola temporal usando el TDA Cola
+    colas_personajes[personaje_id].agregar(mision)
+    
+    # Guardar en la base de datos también (sincronización)
     from sqlalchemy import select, func
     from models import personaje_mision
     
+    siguiente_orden = 1
     consulta = select(func.max(personaje_mision.c.orden)).where(
         personaje_mision.c.personaje_id == personaje_id
     )
@@ -85,7 +99,6 @@ def aceptar_mision(personaje_id: int, mision_id: int, db: Session = Depends(obte
     if resultado:
         siguiente_orden = resultado + 1
     
-    # Añadir la misión al final de la cola (FIFO)
     consulta = personaje_mision.insert().values(
         personaje_id=personaje_id,
         mision_id=mision_id,
@@ -98,22 +111,22 @@ def aceptar_mision(personaje_id: int, mision_id: int, db: Session = Depends(obte
 
 @app.post("/personajes/{personaje_id}/completar")
 def completar_mision(personaje_id: int, db: Session = Depends(obtener_db)):
-    """Completa la primera misión en la cola (desencola) y suma XP"""
+    """Completa la primera misión en la cola temporal y actualiza la base de datos"""
     personaje = db.query(Personaje).filter(Personaje.id == personaje_id).first()
     if not personaje:
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
     
-    # Si no hay misiones en cola
-    if not personaje.misiones:
+    # Verificar si hay misiones en la cola temporal
+    if personaje_id not in colas_personajes or colas_personajes[personaje_id].esta_vacia():
         raise HTTPException(status_code=400, detail="No hay misiones pendientes")
     
-    # Obtener la primera misión (FIFO)
-    primera_mision = personaje.misiones[0]
+    # Sacar la primera misión de la cola temporal usando el TDA Cola
+    primera_mision = colas_personajes[personaje_id].sacar()
     
-    # Sumar XP
+    # Sumar experiencia al personaje
     personaje.agregar_experiencia(primera_mision.recompensa_experiencia)
     
-    # Eliminar la misión de la cola
+    # Eliminar la misión de la base de datos
     from sqlalchemy import delete
     from models import personaje_mision
     
@@ -123,8 +136,8 @@ def completar_mision(personaje_id: int, db: Session = Depends(obtener_db)):
     )
     db.execute(consulta)
     
-    # Reordenar las misiones restantes
-    for i, mision in enumerate(personaje.misiones[1:], 1):
+    # Reordenar las misiones restantes en la base de datos
+    for i, mision in enumerate(personaje.misiones, 1):  # Usamos las misiones restantes de la DB
         consulta = personaje_mision.update().where(
             personaje_mision.c.personaje_id == personaje_id,
             personaje_mision.c.mision_id == mision.id
@@ -141,14 +154,17 @@ def completar_mision(personaje_id: int, db: Session = Depends(obtener_db)):
 
 @app.get("/personajes/{personaje_id}/misiones")
 def listar_misiones_personaje(personaje_id: int, db: Session = Depends(obtener_db)):
-    """Lista las misiones de un personaje en orden FIFO"""
+    """Lista las misiones de un personaje desde la cola temporal y la base de datos"""
     personaje = db.query(Personaje).filter(Personaje.id == personaje_id).first()
     if not personaje:
         raise HTTPException(status_code=404, detail="Personaje no encontrado")
     
+    # Obtener las misiones de la cola temporal
+    misiones_cola = colas_personajes.get(personaje_id, Cola()).a_lista() if personaje_id in colas_personajes else []
+    
     return {
         "personaje": personaje.a_diccionario(),
-        "misiones": [mision.a_diccionario() for mision in personaje.misiones]
+        "misiones": [mision.a_diccionario() for mision in misiones_cola]  # Mostramos la cola temporal
     }
 
 @app.get("/personajes")

@@ -10,13 +10,13 @@ class Cola(Generic[T]):
     def __init__(self):
         self._items = deque()
     
-    def enqueue(self, item: T) -> None:
+    def agregar(self, item: T) -> None:
         """Añade una misión al final de la cola"""
         self._items.append(item)
     
-    def dequeue(self) -> Optional[T]:
+    def sacar(self) -> Optional[T]:
         """Elimina y retorna la primera misión de la cola"""
-        if self.is_empty():
+        if self.esta_vacia():
             return None
         return self._items.popleft()
     
