@@ -313,18 +313,21 @@ class VentanaPersonajes(ctk.CTkFrame):
                 
         except Exception as e:
             messagebox.showerror("Error", f"Error al completar misión: {str(e)}")
-    
+        
     def mostrar_asignar_mision(self):
         """Muestra ventana para asignar una nueva misión"""
         if not hasattr(self, 'id_personaje_actual'):
             return
-            
+        
         # Crear ventana emergente
         self.ventana_asignacion = ctk.CTkToplevel(self)
         self.ventana_asignacion.title("Asignar Nueva Misión")
         self.ventana_asignacion.geometry("400x500")
         self.ventana_asignacion.transient(self)
-        self.ventana_asignacion.grab_set()
+        
+        # Asegurarse de que la ventana sea visible antes de usar grab_set
+        self.ventana_asignacion.wait_visibility()
+        self.ventana_asignacion.after(100, self.ventana_asignacion.grab_set)
         
         # Título
         etiqueta_titulo = ctk.CTkLabel(
@@ -372,7 +375,7 @@ class VentanaPersonajes(ctk.CTkFrame):
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar misiones: {str(e)}")
             self.ventana_asignacion.destroy()
-    
+                
     def asignar_mision(self, id_mision):
         """Asigna una misión al personaje actual"""
         if not hasattr(self, 'id_personaje_actual'):

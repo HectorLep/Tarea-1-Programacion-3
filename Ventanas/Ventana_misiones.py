@@ -308,56 +308,58 @@ class VentanaMisiones(ctk.CTkFrame):
         )
         boton_asignar.pack(pady=20)
     
-    def mostrar_personajes_para_mision(self, mision):
-        """Muestra ventana para seleccionar un personaje"""
-        # Crear ventana emergente
-        self.ventana_asignacion = ctk.CTkToplevel(self)
-        self.ventana_asignacion.title("Seleccionar Personaje")
-        self.ventana_asignacion.geometry("400x500")
-        self.ventana_asignacion.transient(self)
-        self.ventana_asignacion.grab_set()
+def mostrar_personajes_para_mision(self, mision):
+    """Muestra ventana para seleccionar un personaje"""
+    # Crear ventana emergente
+    self.ventana_asignacion = ctk.CTkToplevel(self)
+    self.ventana_asignacion.title("Seleccionar Personaje")
+    self.ventana_asignacion.geometry("400x500")
+    self.ventana_asignacion.transient(self)
+    
+    # Retrasar el grab_set para asegurarnos de que la ventana esté renderizada
+    self.ventana_asignacion.after(100, self.ventana_asignacion.grab_set)  # Retraso de 100ms
+    
+    # Título
+    etiqueta_titulo = ctk.CTkLabel(
+        self.ventana_asignacion,
+        text=f"Asignar: {mision['titulo']}",
+        font=("Arial", 16, "bold")
+    )
+    etiqueta_titulo.pack(pady=(20, 10))
+    
+    # Frame para lista de personajes
+    marco_lista_personajes = ctk.CTkFrame(self.ventana_asignacion)
+    marco_lista_personajes.pack(fill='both', expand=True, padx=20, pady=10)
+    
+    # Cargar personajes disponibles
+    try:
+        respuesta = requests.get(f"{self.url_api}/personajes")
         
-        # Título
-        etiqueta_titulo = ctk.CTkLabel(
-            self.ventana_asignacion,
-            text=f"Asignar: {mision['titulo']}",
-            font=("Arial", 16, "bold")
-        )
-        etiqueta_titulo.pack(pady=(20, 10))
-        
-        # Frame para lista de personajes
-        marco_lista_personajes = ctk.CTkFrame(self.ventana_asignacion)
-        marco_lista_personajes.pack(fill='both', expand=True, padx=20, pady=10)
-        
-        # Cargar personajes disponibles
-        try:
-            respuesta = requests.get(f"{self.url_api}/personajes")
+        if respuesta.status_code == 200:
+            personajes = respuesta.json()
             
-            if respuesta.status_code == 200:
-                personajes = respuesta.json()
-                
-                if not personajes:
-                    etiqueta_vacia = ctk.CTkLabel(
-                        marco_lista_personajes,
-                        text="No hay personajes disponibles",
-                        font=("Arial", 12)
-                    )
-                    etiqueta_vacia.pack(pady=20)
-                else:
-                    # Scrollable frame
-                    marco_desplazable = ctk.CTkScrollableFrame(marco_lista_personajes)
-                    marco_desplazable.pack(fill='both', expand=True, padx=5, pady=5)
-                    
-                    # Crear un botón para cada personaje
-                    for personaje in personajes:
-                        boton = ctk.CTkButton(
-                            marco_desplazable,
-                            text=f"{personaje['nombre']} (Nivel {personaje['nivel']})",
-                            command=lambda p=personaje, m=mision: self.asignar_a_personaje(p['id'], m['id'])
-                        )
-                        boton.pack(fill='x', pady=2)
+            if not personajes:
+                etiqueta_vacia = ctk.CTkLabel(
+                    marco_lista_personajes,
+                    text="No hay personajes disponibles",
+                    font=("Arial", 12)
+                )
+                etiqueta_vacia.pack(pady=20)
             else:
-                messagebox.showerror("Error", "No se pudieron obtener los personajes.")
+                # Scrollable frame
+                marco_desplazable = ctk.CTkScrollableFrame(marco_lista_personajes)
+                marco_desplazable.pack(fill='both', expand=True, padx=5, pady=5)
+                
+                # Crear un botón para cada personaje
+                for personaje in personajes:
+                    boton = ctk.CTkButton(
+                        marco_desplazable,
+                        text=f"{personaje['nombre']} (Nivel {personaje['nivel']})",
+                        command=lambda p=personaje, m=mision: self.asignar_a_personaje(p['id'], m['id'])
+                    )
+                    boton.pack(fill='x', pady=2)
+        else:
+            messagebox.showerror("Error", "No se pudieron obtener los personajes.")
 
-        except Exception as e:
-            messagebox.showerror("Error", f"Ocurrió un problema al conectar con la API:\n{e}")
+    except Exception as e:
+        messagebox.showerror("Error", f"Ocurrió un problema al conectar con la API:\n{e}")

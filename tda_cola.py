@@ -20,21 +20,21 @@ class Cola(Generic[T]):
             return None
         return self._items.popleft()
     
-    def first(self) -> Optional[T]:
+    def primero(self) -> Optional[T]:
         """Retorna la primera misión sin removerla"""
-        if self.is_empty():
+        if self.esta_vacia():
             return None
         return self._items[0]
     
-    def is_empty(self) -> bool:
+    def esta_vacia(self) -> bool:
         """Verifica si la cola está vacía"""
         return len(self._items) == 0
     
-    def size(self) -> int:
+    def tamano(self) -> int:
         """Retorna la cantidad de misiones en la cola"""
         return len(self._items)
     
-    def to_list(self) -> List[T]:
+    def a_lista(self) -> List[T]:
         """Convierte la cola a una lista (para serialización)"""
         return list(self._items)
     
